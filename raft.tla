@@ -209,7 +209,7 @@ AppendEntries(i, j) ==
                           ELSE
                               0
            \* Send up to 1 entry, constrained by the end of the log.
-           lastEntry == Min({Len(log[i]), nextIndex[i][j] + 1})
+           lastEntry == Min({Len(log[i]), nextIndex[i][j]})
            entries == SubSeq(log[i], nextIndex[i][j], lastEntry)
        IN Send([mtype          |-> AppendEntriesRequest,
                 mterm          |-> currentTerm[i],
@@ -471,6 +471,10 @@ Spec == Init /\ [][Next]_vars
 \* Changelog:
 \*
 \* 2014-12-02:
+\* - Fix AppendEntries to only send one entry at a time, as originally
+\*   intended. Since SubSeq is inclusive, the upper bound of the range should
+\*   have been nextIndex, not nextIndex + 1. Thanks to Igor Kovalenko for
+\*   reporting the issue.
 \* - Change matchIndex' to matchIndex (without the apostrophe) in
 \*   AdvanceCommitIndex. This apostrophe was not intentional and perhaps
 \*   confusing, though it makes no practical difference (matchIndex' equals
