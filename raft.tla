@@ -1,6 +1,5 @@
 --------------------------------- MODULE raft ---------------------------------
 \* This is the formal specification for the Raft consensus algorithm.
-\* It was last modified on July 6, 2014.
 \*
 \* Copyright 2014 Diego Ongaro.
 \* This work is licensed under the Creative Commons Attribution-4.0
@@ -260,7 +259,7 @@ AdvanceCommitIndex(i) ==
     /\ state[i] = Leader
     /\ LET \* The set of servers that agree up through index.
            Agree(index) == {i} \cup {k \in Server :
-                                         matchIndex'[i][k] >= index}
+                                         matchIndex[i][k] >= index}
            \* The maximum indexes for which a quorum agrees
            agreeIndexes == {index \in 1..Len(log[i]) :
                                 Agree(index) \in Quorum}
@@ -468,3 +467,14 @@ Next == /\ \/ \E i \in Server : Restart(i)
 Spec == Init /\ [][Next]_vars
 
 ===============================================================================
+
+\* Changelog:
+\*
+\* 2014-12-02:
+\* - Change matchIndex' to matchIndex (without the apostrophe) in
+\*   AdvanceCommitIndex. This apostrophe was not intentional and perhaps
+\*   confusing, though it makes no practical difference (matchIndex' equals
+\*   matchIndex). Thanks to Hugues Evrard for reporting the issue.
+\*
+\* 2014-07-06:
+\* - Version from PhD dissertation
