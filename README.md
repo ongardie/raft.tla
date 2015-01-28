@@ -1,4 +1,4 @@
-TLA+ specification for the Raft consensus algorithm.
+TLA+ specification for the Raft consensus algorithm. This is slightly updated compared to the dissertation version.
 
 For more information, see Chapter 8 (Correctness) and Appendix B (Safety proof and formal specification) in https://github.com/ongardie/dissertation .
 
