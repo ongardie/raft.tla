@@ -10,9 +10,6 @@ EXTENDS Naturals, FiniteSets, Sequences, TLC
 \* The set of server IDs
 CONSTANTS Server
 
-\* The set of requests that can go into the log
-CONSTANTS Value
-
 \* Server states.
 CONSTANTS Follower, Candidate, Leader
 
@@ -22,9 +19,16 @@ CONSTANTS Nil
 \* Message types:
 CONSTANTS RequestVoteRequest, RequestVoteResponse,
           AppendEntriesRequest, AppendEntriesResponse
+          
+\* Maximum number of client requests
+CONSTANTS MaxClientRequests
+
+
 
 ----
 \* Global variables
+
+
 
 \* A bag of records representing requests and responses sent from one server
 \* to another. TLAPS doesn't support the Bags module, so this is a function
@@ -55,18 +59,25 @@ VARIABLE state
 VARIABLE votedFor
 serverVars == <<currentTerm, state, votedFor>>
 
+\* The set of requests that can go into the log
+VARIABLE clientRequests
+
 \* A Sequence of log entries. The index into this sequence is the index of the
 \* log entry. Unfortunately, the Sequence module defines Head(s) as the entry
 \* with index 1, so be careful not to use that!
 VARIABLE log
 \* The index of the latest entry in the log the state machine may apply.
 VARIABLE commitIndex
-logVars == <<log, commitIndex>>
+\* The index that gets committed
+VARIABLE committedLog
+\* Does the commited Index decrease
+VARIABLE committedLogDecrease
+logVars == <<log, commitIndex, clientRequests, committedLog, committedLogDecrease >>
 
 \* The following variables are used only on candidates:
 \* The set of servers from which the candidate has received a RequestVote
 \* response in its currentTerm.
-VARIABLE votesResponded
+VARIABLE votesSent
 \* The set of servers from which the candidate has received a vote in its
 \* currentTerm.
 VARIABLE votesGranted
@@ -75,7 +86,7 @@ VARIABLE votesGranted
 \* Function from each server that voted for this candidate in its currentTerm
 \* to that voter's log.
 VARIABLE voterLog
-candidateVars == <<votesResponded, votesGranted, voterLog>>
+candidateVars == <<votesSent, votesGranted, voterLog>>
 
 \* The following variables are used only on leaders:
 \* The next entry to send to each follower.
@@ -105,7 +116,7 @@ LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
 \* new bag of messages with one more m in it.
 WithMessage(m, msgs) ==
     IF m \in DOMAIN msgs THEN
-        [msgs EXCEPT ![m] = msgs[m] + 1]
+        [msgs EXCEPT ![m] = IF msgs[m] < 2 THEN msgs[m] + 1 ELSE 2 ]
     ELSE
         msgs @@ (m :> 1)
 
@@ -113,9 +124,15 @@ WithMessage(m, msgs) ==
 \* a new bag of messages with one less m in it.
 WithoutMessage(m, msgs) ==
     IF m \in DOMAIN msgs THEN
-        [msgs EXCEPT ![m] = msgs[m] - 1]
+        [msgs EXCEPT ![m] = IF msgs[m] > 0 THEN msgs[m] - 1 ELSE 0 ]
     ELSE
         msgs
+        
+ValidMessage(msgs) ==
+    { m \in DOMAIN messages : msgs[m] > 0 }
+    
+SingleMessage(msgs) ==
+    { m \in DOMAIN messages : msgs[m] = 1 } 
 
 \* Add a message to the bag of messages.
 Send(m) == messages' = WithMessage(m, messages)
@@ -142,7 +159,7 @@ InitHistoryVars == /\ elections = {}
 InitServerVars == /\ currentTerm = [i \in Server |-> 1]
                   /\ state       = [i \in Server |-> Follower]
                   /\ votedFor    = [i \in Server |-> Nil]
-InitCandidateVars == /\ votesResponded = [i \in Server |-> {}]
+InitCandidateVars == /\ votesSent = [i \in Server |-> FALSE ]
                      /\ votesGranted   = [i \in Server |-> {}]
 \* The values nextIndex[i][i] and matchIndex[i][i] are never read, since the
 \* leader does not send itself messages. It's still easier to include these
@@ -151,6 +168,9 @@ InitLeaderVars == /\ nextIndex  = [i \in Server |-> [j \in Server |-> 1]]
                   /\ matchIndex = [i \in Server |-> [j \in Server |-> 0]]
 InitLogVars == /\ log          = [i \in Server |-> << >>]
                /\ commitIndex  = [i \in Server |-> 0]
+               /\ clientRequests = 1
+               /\ committedLog = << >>
+               /\ committedLogDecrease = FALSE
 Init == /\ messages = [m \in {} |-> 0]
         /\ InitHistoryVars
         /\ InitServerVars
@@ -165,13 +185,13 @@ Init == /\ messages = [m \in {} |-> 0]
 \* It loses everything but its currentTerm, votedFor, and log.
 Restart(i) ==
     /\ state'          = [state EXCEPT ![i] = Follower]
-    /\ votesResponded' = [votesResponded EXCEPT ![i] = {}]
+    /\ votesSent'      = [votesSent EXCEPT ![i] = FALSE ]
     /\ votesGranted'   = [votesGranted EXCEPT ![i] = {}]
     /\ voterLog'       = [voterLog EXCEPT ![i] = [j \in {} |-> <<>>]]
     /\ nextIndex'      = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
     /\ matchIndex'     = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
     /\ commitIndex'    = [commitIndex EXCEPT ![i] = 0]
-    /\ UNCHANGED <<messages, currentTerm, votedFor, log, elections>>
+    /\ UNCHANGED <<messages, currentTerm, votedFor, log, elections, clientRequests, committedLog, committedLogDecrease>>
 
 \* Server i times out and starts a new election.
 Timeout(i) == /\ state[i] \in {Follower, Candidate}
@@ -180,22 +200,21 @@ Timeout(i) == /\ state[i] \in {Follower, Candidate}
               \* Most implementations would probably just set the local vote
               \* atomically, but messaging localhost for it is weaker.
               /\ votedFor' = [votedFor EXCEPT ![i] = Nil]
-              /\ votesResponded' = [votesResponded EXCEPT ![i] = {}]
+              /\ votesSent' = [votesSent EXCEPT ![i] = FALSE ]
               /\ votesGranted'   = [votesGranted EXCEPT ![i] = {}]
               /\ voterLog'       = [voterLog EXCEPT ![i] = [j \in {} |-> <<>>]]
               /\ UNCHANGED <<messages, leaderVars, logVars>>
 
 \* Candidate i sends j a RequestVote request.
-RequestVote(i, j) ==
+RequestVote(i,j) ==
     /\ state[i] = Candidate
-    /\ j \notin votesResponded[i]
     /\ Send([mtype         |-> RequestVoteRequest,
              mterm         |-> currentTerm[i],
              mlastLogTerm  |-> LastTerm(log[i]),
              mlastLogIndex |-> Len(log[i]),
              msource       |-> i,
              mdest         |-> j])
-    /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars>>
+    /\ UNCHANGED <<serverVars, votesGranted, voterLog, leaderVars, logVars, votesSent>>
 
 \* Leader i sends j an AppendEntries request containing up to 1 entry.
 \* While implementations may want to send more than 1 at a time, this spec uses
@@ -242,14 +261,17 @@ BecomeLeader(i) ==
     /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars>>
 
 \* Leader i receives a client request to add v to the log.
-ClientRequest(i, v) ==
+ClientRequest(i) ==
     /\ state[i] = Leader
+    /\ clientRequests < MaxClientRequests
     /\ LET entry == [term  |-> currentTerm[i],
-                     value |-> v]
+                     value |-> clientRequests]
            newLog == Append(log[i], entry)
-       IN  log' = [log EXCEPT ![i] = newLog]
+       IN  /\ log' = [log EXCEPT ![i] = newLog]
+           \* Make sure that each request is unique, reduce state space to be explored
+           /\ clientRequests' = clientRequests + 1
     /\ UNCHANGED <<messages, serverVars, candidateVars,
-                   leaderVars, commitIndex>>
+                   leaderVars, commitIndex, committedLog, committedLogDecrease>>
 
 \* Leader i advances its commitIndex.
 \* This is done as a separate step from handling AppendEntries responses,
@@ -271,8 +293,16 @@ AdvanceCommitIndex(i) ==
                   Max(agreeIndexes)
               ELSE
                   commitIndex[i]
-       IN commitIndex' = [commitIndex EXCEPT ![i] = newCommitIndex]
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, log>>
+           newCommittedLog ==
+              IF newCommitIndex > 1 THEN 
+                  [ j \in 1..newCommitIndex |-> log[i][j] ] 
+              ELSE 
+                   << >>
+       IN /\ commitIndex' = [commitIndex EXCEPT ![i] = newCommitIndex]
+          /\ committedLogDecrease' = \/ ( newCommitIndex < Len(committedLog) )
+                                     \/ \E j \in 1..Len(committedLog) : committedLog[j] /= newCommittedLog[j]
+          /\ committedLog' = newCommittedLog
+    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, log, clientRequests>>
 
 ----
 \* Message handlers
@@ -307,15 +337,14 @@ HandleRequestVoteResponse(i, j, m) ==
     \* This tallies votes even when the current state is not Candidate, but
     \* they won't be looked at, so it doesn't matter.
     /\ m.mterm = currentTerm[i]
-    /\ votesResponded' = [votesResponded EXCEPT ![i] =
-                              votesResponded[i] \cup {j}]
     /\ \/ /\ m.mvoteGranted
           /\ votesGranted' = [votesGranted EXCEPT ![i] =
                                   votesGranted[i] \cup {j}]
           /\ voterLog' = [voterLog EXCEPT ![i] =
                               voterLog[i] @@ (j :> m.mlog)]
+          /\ UNCHANGED <<votesSent>>
        \/ /\ ~m.mvoteGranted
-          /\ UNCHANGED <<votesGranted, voterLog>>
+          /\ UNCHANGED <<votesSent, votesGranted, voterLog>>
     /\ Discard(m)
     /\ UNCHANGED <<serverVars, votedFor, leaderVars, logVars>>
 
@@ -354,7 +383,8 @@ HandleAppendEntriesRequest(i, j, m) ==
              /\ LET index == m.mprevLogIndex + 1
                 IN \/ \* already done with request
                        /\ \/ m.mentries = << >>
-                          \/ /\ Len(log[i]) >= index
+                          \/ /\ m.mentries /= << >>
+                             /\ Len(log[i]) >= index
                              /\ log[i][index].term = m.mentries[1].term
                           \* This could make our commitIndex decrease (for
                           \* example if we process an old, duplicated request),
@@ -377,13 +407,13 @@ HandleAppendEntriesRequest(i, j, m) ==
                        /\ LET new == [index2 \in 1..(Len(log[i]) - 1) |->
                                           log[i][index2]]
                           IN log' = [log EXCEPT ![i] = new]
-                       /\ UNCHANGED <<serverVars, commitIndex, messages>>
+                       /\ UNCHANGED <<serverVars, commitIndex, messages, clientRequests, committedLog, committedLogDecrease>>
                    \/ \* no conflict: append entry
                        /\ m.mentries /= << >>
                        /\ Len(log[i]) = m.mprevLogIndex
                        /\ log' = [log EXCEPT ![i] =
                                       Append(log[i], m.mentries[1])]
-                       /\ UNCHANGED <<serverVars, commitIndex, messages>>
+                       /\ UNCHANGED <<serverVars, commitIndex, messages, clientRequests, committedLog, committedLogDecrease>>
        /\ UNCHANGED <<candidateVars, leaderVars>>
 
 \* Server i receives an AppendEntries response from server j with
@@ -451,20 +481,39 @@ DropMessage(m) ==
 \* Defines how the variables may transition.
 Next == /\ \/ \E i \in Server : Restart(i)
            \/ \E i \in Server : Timeout(i)
-           \/ \E i,j \in Server : RequestVote(i, j)
+           \/ \E i, j \in Server : RequestVote(i, j)
            \/ \E i \in Server : BecomeLeader(i)
-           \/ \E i \in Server, v \in Value : ClientRequest(i, v)
+           \/ \E i \in Server : ClientRequest(i)
            \/ \E i \in Server : AdvanceCommitIndex(i)
            \/ \E i,j \in Server : AppendEntries(i, j)
-           \/ \E m \in DOMAIN messages : Receive(m)
-           \/ \E m \in DOMAIN messages : DuplicateMessage(m)
-           \/ \E m \in DOMAIN messages : DropMessage(m)
+           \/ \E m \in ValidMessage(messages) : Receive(m)
+           \/ \E m \in SingleMessage(messages) : DuplicateMessage(m)
+           \/ \E m \in ValidMessage(messages) : DropMessage(m)
            \* History variable that tracks every log ever:
         /\ allLogs' = allLogs \cup {log[i] : i \in Server}
 
 \* The specification must start with the initial state and transition according
 \* to Next.
 Spec == Init /\ [][Next]_vars
+
+\* The following are a set of verification by jinlmsft@hotmail.com
+BothLeader( i, j ) == 
+    /\ i /= j
+    /\ currentTerm[i] = currentTerm[j]
+    /\ state[i] = Leader
+    /\ state[j] = Leader
+
+MoreThanOneLeader ==
+    \E i, j \in Server :  BothLeader( i, j ) 
+    
+    
+    
+
+
+
+
+
+
 
 ===============================================================================
 
