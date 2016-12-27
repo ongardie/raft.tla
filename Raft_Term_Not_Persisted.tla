@@ -1,4 +1,4 @@
---------------------------------- MODULE raft ---------------------------------
+--------------------------------- MODULE Raft_Term_Not_Persisted ---------------------------------
 \* This is the formal specification for the Raft consensus algorithm.
 \*
 \* Copyright 2014 Diego Ongaro.
@@ -22,6 +22,9 @@ CONSTANTS RequestVoteRequest, RequestVoteResponse,
           
 \* Maximum number of client requests
 CONSTANTS MaxClientRequests
+
+\* Whether to allow Message Duplicate and Drop
+CONSTANTS LossyNetwork
 
 
 
@@ -115,10 +118,17 @@ LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
 \* Helper for Send and Reply. Given a message m and bag of messages, return a
 \* new bag of messages with one more m in it.
 WithMessage(m, msgs) ==
-    IF m \in DOMAIN msgs THEN
-        [msgs EXCEPT ![m] = IF msgs[m] < 2 THEN msgs[m] + 1 ELSE 2 ]
+    IF LossyNetwork THEN 
+        IF m \in DOMAIN msgs THEN
+            [msgs EXCEPT ![m] = IF msgs[m] < 2 THEN msgs[m] + 1 ELSE 2 ]
+        ELSE
+            msgs @@ (m :> 1)
     ELSE
-        msgs @@ (m :> 1)
+        IF m \in DOMAIN msgs THEN
+            msgs
+        ELSE
+            msgs @@ (m :> 1)
+        
 
 \* Helper for Discard and Reply. Given a message m and bag of messages, return
 \* a new bag of messages with one less m in it.
@@ -191,7 +201,10 @@ Restart(i) ==
     /\ nextIndex'      = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
     /\ matchIndex'     = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
     /\ commitIndex'    = [commitIndex EXCEPT ![i] = 0]
-    /\ UNCHANGED <<messages, currentTerm, votedFor, log, elections, clientRequests, committedLog, committedLogDecrease>>
+    \* JinL: currentTerm not persist, but derived from term in Log, should lead to an error. 
+    \* /\ currentTerm'    = [currentTerm EXCEPT ![i] = IF Len(log[i]) > 0 THEN log[i][Len(log[i])].term ELSE 1 ]
+    /\ votedFor'       = [votedFor EXCEPT ![i] = Nil ]      
+    /\ UNCHANGED <<messages, currentTerm, log, elections, clientRequests, committedLog, committedLogDecrease>>
 
 \* Server i times out and starts a new election.
 Timeout(i) == /\ state[i] \in {Follower, Candidate}
@@ -263,7 +276,7 @@ BecomeLeader(i) ==
 \* Leader i receives a client request to add v to the log.
 ClientRequest(i) ==
     /\ state[i] = Leader
-    /\ clientRequests < MaxClientRequests
+    /\ clientRequests <= MaxClientRequests
     /\ LET entry == [term  |-> currentTerm[i],
                      value |-> clientRequests]
            newLog == Append(log[i], entry)
@@ -399,7 +412,7 @@ HandleAppendEntriesRequest(i, j, m) ==
                                  msource         |-> i,
                                  mdest           |-> j],
                                  m)
-                       /\ UNCHANGED <<serverVars, logVars>>
+                       /\ UNCHANGED <<serverVars, log, clientRequests, committedLog, committedLogDecrease>>
                    \/ \* conflict: remove 1 entry
                        /\ m.mentries /= << >>
                        /\ Len(log[i]) >= index
@@ -463,7 +476,7 @@ Receive(m) ==
           /\ \/ DropStaleResponse(i, j, m)
              \/ HandleAppendEntriesResponse(i, j, m)
 
-\* End of message handlers.
+\* End of message handlers.have 
 ----
 \* Network state transitions
 
@@ -487,8 +500,9 @@ Next == /\ \/ \E i \in Server : Restart(i)
            \/ \E i \in Server : AdvanceCommitIndex(i)
            \/ \E i,j \in Server : AppendEntries(i, j)
            \/ \E m \in ValidMessage(messages) : Receive(m)
-           \/ \E m \in SingleMessage(messages) : DuplicateMessage(m)
-           \/ \E m \in ValidMessage(messages) : DropMessage(m)
+           \/ /\ LossyNetwork
+              /\ \/ \E m \in SingleMessage(messages) : DuplicateMessage(m)
+                 \/ \E m \in ValidMessage(messages) : DropMessage(m)
            \* History variable that tracks every log ever:
         /\ allLogs' = allLogs \cup {log[i] : i \in Server}
 
