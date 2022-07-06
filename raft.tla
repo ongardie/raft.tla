@@ -36,12 +36,13 @@ VARIABLE messages
 \* Keeps track of successful elections, including the initial logs of the
 \* leader and voters' logs. Set of functions containing various things about
 \* successful elections (see BecomeLeader).
-VARIABLE elections
+\*VARIABLE elections
 
 \* A history variable used in the proof. This would not be present in an
 \* implementation.
 \* Keeps track of every log ever in the system (set of logs).
-VARIABLE allLogs
+\*VARIABLE allLogs
+
 
 ----
 \* The following variables are all per server (functions with domain Server).
@@ -74,8 +75,8 @@ VARIABLE votesGranted
 \* implementation.
 \* Function from each server that voted for this candidate in its currentTerm
 \* to that voter's log.
-VARIABLE voterLog
-candidateVars == <<votesResponded, votesGranted, voterLog>>
+\*VARIABLE voterLog
+candidateVars == <<votesResponded, votesGranted>>
 
 \* The following variables are used only on leaders:
 \* The next entry to send to each follower.
@@ -83,13 +84,13 @@ VARIABLE nextIndex
 \* The latest entry that each follower has acknowledged is the same as the
 \* leader's. This is used to calculate commitIndex on the leader.
 VARIABLE matchIndex
-leaderVars == <<nextIndex, matchIndex, elections>>
+leaderVars == <<nextIndex, matchIndex>>
 
 \* End of per server variables.
 ----
 
 \* All variables; used for stuttering (asserting state hasn't changed).
-vars == <<messages, allLogs, serverVars, candidateVars, leaderVars, logVars>>
+vars == <<messages, serverVars, candidateVars, leaderVars, logVars>>
 
 ----
 \* Helpers
@@ -136,9 +137,10 @@ Max(s) == CHOOSE x \in s : \A y \in s : x >= y
 ----
 \* Define initial values for all variables
 
-InitHistoryVars == /\ elections = {}
-                   /\ allLogs   = {}
-                   /\ voterLog  = [i \in Server |-> [j \in {} |-> <<>>]]
+\*InitHistoryVars == /\ elections = {}
+\*                   /\ allLogs   = {}
+\*                   /\ behaviorLength = 0
+\*                   /\ voterLog  = [i \in Server |-> [j \in {} |-> <<>>]]
 InitServerVars == /\ currentTerm = [i \in Server |-> 1]
                   /\ state       = [i \in Server |-> Follower]
                   /\ votedFor    = [i \in Server |-> Nil]
@@ -152,7 +154,7 @@ InitLeaderVars == /\ nextIndex  = [i \in Server |-> [j \in Server |-> 1]]
 InitLogVars == /\ log          = [i \in Server |-> << >>]
                /\ commitIndex  = [i \in Server |-> 0]
 Init == /\ messages = [m \in {} |-> 0]
-        /\ InitHistoryVars
+\*        /\ InitHistoryVars
         /\ InitServerVars
         /\ InitCandidateVars
         /\ InitLeaderVars
@@ -167,11 +169,11 @@ Restart(i) ==
     /\ state'          = [state EXCEPT ![i] = Follower]
     /\ votesResponded' = [votesResponded EXCEPT ![i] = {}]
     /\ votesGranted'   = [votesGranted EXCEPT ![i] = {}]
-    /\ voterLog'       = [voterLog EXCEPT ![i] = [j \in {} |-> <<>>]]
+\*    /\ voterLog'       = [voterLog EXCEPT ![i] = [j \in {} |-> <<>>]]
     /\ nextIndex'      = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
     /\ matchIndex'     = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
     /\ commitIndex'    = [commitIndex EXCEPT ![i] = 0]
-    /\ UNCHANGED <<messages, currentTerm, votedFor, log, elections>>
+    /\ UNCHANGED <<messages, currentTerm, votedFor, log>>
 
 \* Server i times out and starts a new election.
 Timeout(i) == /\ state[i] \in {Follower, Candidate}
@@ -182,7 +184,7 @@ Timeout(i) == /\ state[i] \in {Follower, Candidate}
               /\ votedFor' = [votedFor EXCEPT ![i] = Nil]
               /\ votesResponded' = [votesResponded EXCEPT ![i] = {}]
               /\ votesGranted'   = [votesGranted EXCEPT ![i] = {}]
-              /\ voterLog'       = [voterLog EXCEPT ![i] = [j \in {} |-> <<>>]]
+\*              /\ voterLog'       = [voterLog EXCEPT ![i] = [j \in {} |-> <<>>]]
               /\ UNCHANGED <<messages, leaderVars, logVars>>
 
 \* Candidate i sends j a RequestVote request.
@@ -218,7 +220,7 @@ AppendEntries(i, j) ==
                 mentries       |-> entries,
                 \* mlog is used as a history variable for the proof.
                 \* It would not exist in a real implementation.
-                mlog           |-> log[i],
+\*                mlog           |-> log[i],
                 mcommitIndex   |-> Min({commitIndex[i], lastEntry}),
                 msource        |-> i,
                 mdest          |-> j])
@@ -233,12 +235,12 @@ BecomeLeader(i) ==
                          [j \in Server |-> Len(log[i]) + 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] =
                          [j \in Server |-> 0]]
-    /\ elections'  = elections \cup
-                         {[eterm     |-> currentTerm[i],
-                           eleader   |-> i,
-                           elog      |-> log[i],
-                           evotes    |-> votesGranted[i],
-                           evoterLog |-> voterLog[i]]}
+\*    /\ elections'  = elections \cup
+\*                         {[eterm     |-> currentTerm[i],
+\*                           eleader   |-> i,
+\*                           elog      |-> log[i],
+\*                           evotes    |-> votesGranted[i],
+\*                           evoterLog |-> voterLog[i]]}
     /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars>>
 
 \* Leader i receives a client request to add v to the log.
@@ -295,7 +297,7 @@ HandleRequestVoteRequest(i, j, m) ==
                  mvoteGranted |-> grant,
                  \* mlog is used just for the `elections' history variable for
                  \* the proof. It would not exist in a real implementation.
-                 mlog         |-> log[i],
+\*                 mlog         |-> log[i],
                  msource      |-> i,
                  mdest        |-> j],
                  m)
@@ -312,10 +314,10 @@ HandleRequestVoteResponse(i, j, m) ==
     /\ \/ /\ m.mvoteGranted
           /\ votesGranted' = [votesGranted EXCEPT ![i] =
                                   votesGranted[i] \cup {j}]
-          /\ voterLog' = [voterLog EXCEPT ![i] =
-                              voterLog[i] @@ (j :> m.mlog)]
+\*          /\ voterLog' = [voterLog EXCEPT ![i] =
+\*                              voterLog[i] @@ (j :> m.mlog)]
        \/ /\ ~m.mvoteGranted
-          /\ UNCHANGED <<votesGranted, voterLog>>
+          /\ UNCHANGED <<votesGranted>>
     /\ Discard(m)
     /\ UNCHANGED <<serverVars, votedFor, leaderVars, logVars>>
 
@@ -399,7 +401,7 @@ HandleAppendEntriesResponse(i, j, m) ==
                                Max({nextIndex[i][j] - 1, 1})]
           /\ UNCHANGED <<matchIndex>>
     /\ Discard(m)
-    /\ UNCHANGED <<serverVars, candidateVars, logVars, elections>>
+    /\ UNCHANGED <<serverVars, candidateVars, logVars>>
 
 \* Any RPC with a newer term causes the recipient to advance its term first.
 UpdateTerm(i, j, m) ==
@@ -450,8 +452,8 @@ DropMessage(m) ==
 
 ----
 \* Defines how the variables may transition.
-Next == /\ \/ \E i \in Server : Restart(i)
-           \/ \E i \in Server : Timeout(i)
+Next == /\ \/ \E i \in Server : Timeout(i)
+           \/ \E i \in Server : Restart(i)
            \/ \E i,j \in Server : RequestVote(i, j)
            \/ \E i \in Server : BecomeLeader(i)
            \/ \E i \in Server, v \in Value : ClientRequest(i, v)
@@ -461,11 +463,42 @@ Next == /\ \/ \E i \in Server : Restart(i)
            \/ \E m \in DOMAIN messages : DuplicateMessage(m)
            \/ \E m \in DOMAIN messages : DropMessage(m)
            \* History variable that tracks every log ever:
-        /\ allLogs' = allLogs \cup {log[i] : i \in Server}
+\*        /\ allLogs' = allLogs \cup {log[i] : i \in Server}
+\*        /\ behaviorLength' = behaviorLength + 1
 
+        
+        
 \* The specification must start with the initial state and transition according
 \* to Next.
 Spec == Init /\ [][Next]_vars
+
+\* The following are a set of verification by jinlmsft@hotmail.com
+BothLeader( i, j ) == 
+    /\ i /= j
+    /\ currentTerm[i] = currentTerm[j]
+    /\ state[i] = Leader
+    /\ state[j] = Leader
+
+LessOrEqualOneLeader ==
+    ~\E i, j \in Server :  BothLeader( i, j ) 
+ 
+MinNum(num1, num2) == IF num1 < num2 THEN num1 ELSE num2
+    
+\* compare with check deadlock
+LogMatchingHelper3(log1, log2, k) ==
+    /\ log1[k].term = log2[k].term
+    /\ SubSeq(log1, 1, k) /= SubSeq(log2, 1, k)
+
+LogMatchingHelper2(log1, log2) ==
+    \E k \in 1..MinNum(Len(log1), Len(log2)) : LogMatchingHelper3(log1, log2, k)
+   
+LogMatchingHelper1(i, j) ==
+    /\ i /= j
+    /\ LogMatchingHelper2(log[i], log[j])
+    
+
+LogMatching ==
+    ~\E i, j \in Server : LogMatchingHelper1(i, j)
 
 ===============================================================================
 
