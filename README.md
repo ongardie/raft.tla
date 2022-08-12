@@ -1,9 +1,39 @@
-Formal TLA+ specification for the [Raft consensus algorithm](https://raftconsensus.github.io). This is slightly updated compared to the dissertation version.
+## Purpose
+Try to model check some raft conditions in finite time
 
-For more information, see Chapter 8 (Correctness) and Appendix B (Safety proof and formal specification) in https://github.com/ongardie/dissertation .
+## Strategy
+1. Eliminate unnecessary variables
+    - eliminated variables: allLogs, voterLog, elections, behaviorLength, mlog
+2. Add state constraint to make the number of state finite
+    - constraints for all servers: currentTerm (T), log length (L), duplicate message length (M)
+    - Note: you could either add the constraints in Next or specify in model spec options. Do not add in invariances; otherwise the model check will terminate as long as it find one state that does not meet the constraint
 
-If you're trying to run the TLA+ model checker on this specification, check out Jin Li's changes in [Pull Request #4](https://github.com/ongardie/raft.tla/pull/4/).
+## upper bound
+From @kmsalem
+```
+currentTerm:  T*S
+state: 3*S
+votedFor:  S^2
+log: S*L   (assuming a single value)
+commitIndex: S*L
+votesResponded: S*2^S
+votesGranted: S*2^S
+nextIndex: S*L
+matchIndex: S*L
 
-Copyright 2014 Diego Ongaro.
+Overall state space size: S^14 * L^4 * T^1
+(not counting the "messages" variable) 
+```
 
-This work is licensed under the Creative Commons Attribution-4.0 International License https://creativecommons.org/licenses/by/4.0/ .
+However, we find that with small bound on the state constraints, the model check still run inifinite time.
+
+The problem is that we don't bound masgs[m] to be bigger or equal to 0.
+
+Solution: we should only reply if there is message
+```
+WithoutMessage(m, msgs) ==
+    IF m \in DOMAIN msgs /\ msgs[m] > 0 THEN
+        [msgs EXCEPT ![m] = msgs[m] - 1]
+    ELSE
+        msgs
+```

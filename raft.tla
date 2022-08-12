@@ -113,7 +113,7 @@ WithMessage(m, msgs) ==
 \* Helper for Discard and Reply. Given a message m and bag of messages, return
 \* a new bag of messages with one less m in it.
 WithoutMessage(m, msgs) ==
-    IF m \in DOMAIN msgs THEN
+    IF m \in DOMAIN msgs /\ msgs[m] > 0 THEN
         [msgs EXCEPT ![m] = msgs[m] - 1]
     ELSE
         msgs
@@ -451,22 +451,29 @@ DropMessage(m) ==
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars>>
 
 ----
+CurrTermConstraint == \A i \in Server : currentTerm[i] < 2
+
+LogLenConstraint == \A i \in Server : Len(log[i]) < 1
+
+DuplicateMessConstraint == \A m \in DOMAIN messages: messages[m] < 2
+
 \* Defines how the variables may transition.
 Next == /\ \/ \E i \in Server : Timeout(i)
-           \/ \E i \in Server : Restart(i)
-           \/ \E i,j \in Server : RequestVote(i, j)
-           \/ \E i \in Server : BecomeLeader(i)
-           \/ \E i \in Server, v \in Value : ClientRequest(i, v)
-           \/ \E i \in Server : AdvanceCommitIndex(i)
-           \/ \E i,j \in Server : AppendEntries(i, j)
+           \/ \E i \in Server : Restart(i) 
+           \/ \E i,j \in Server : RequestVote(i, j) \* candidate
+           \/ \E i \in Server : BecomeLeader(i) \* candidate; votesGranted
+           \/ \E i \in Server, v \in Value : ClientRequest(i, v) \* i must be leader; |log[i]| increase by 1
+           \/ \E i \in Server : AdvanceCommitIndex(i) \* i must be leader; no change for |server| = 1
+           \/ \E i,j \in Server : AppendEntries(i, j) \* i must be leader; i != j
            \/ \E m \in DOMAIN messages : Receive(m)
-           \/ \E m \in DOMAIN messages : DuplicateMessage(m)
-           \/ \E m \in DOMAIN messages : DropMessage(m)
+\*           \/ \E m \in DOMAIN messages : DuplicateMessage(m)
+\*           \/ \E m \in DOMAIN messages : DropMessage(m)
            \* History variable that tracks every log ever:
 \*        /\ allLogs' = allLogs \cup {log[i] : i \in Server}
 \*        /\ behaviorLength' = behaviorLength + 1
-
-        
+        /\ CurrTermConstraint
+        /\ LogLenConstraint
+        /\ DuplicateMessConstraint
         
 \* The specification must start with the initial state and transition according
 \* to Next.
