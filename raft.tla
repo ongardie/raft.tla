@@ -113,7 +113,8 @@ WithMessage(m, msgs) ==
 \* a new bag of messages with one less m in it.
 WithoutMessage(m, msgs) ==
     IF m \in DOMAIN msgs THEN
-        [msgs EXCEPT ![m] = msgs[m] - 1]
+        IF msgs[m] <= 1 THEN [i \in DOMAIN msgs \ {m} |-> msgs[i]]
+        ELSE [msgs EXCEPT ![m] = msgs[m] - 1]
     ELSE
         msgs
 
