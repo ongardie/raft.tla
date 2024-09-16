@@ -467,20 +467,3 @@ Next == /\ \/ \E i \in Server : Restart(i)
 \* The specification must start with the initial state and transition according
 \* to Next.
 Spec == Init /\ [][Next]_vars
-
-===============================================================================
-
-\* Changelog:
-\*
-\* 2014-12-02:
-\* - Fix AppendEntries to only send one entry at a time, as originally
-\*   intended. Since SubSeq is inclusive, the upper bound of the range should
-\*   have been nextIndex, not nextIndex + 1. Thanks to Igor Kovalenko for
-\*   reporting the issue.
-\* - Change matchIndex' to matchIndex (without the apostrophe) in
-\*   AdvanceCommitIndex. This apostrophe was not intentional and perhaps
-\*   confusing, though it makes no practical difference (matchIndex' equals
-\*   matchIndex). Thanks to Hugues Evrard for reporting the issue.
-\*
-\* 2014-07-06:
-\* - Version from PhD dissertation
