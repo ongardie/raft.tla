@@ -361,8 +361,11 @@ HandleAppendEntriesRequest(i, j, m) ==
                           \* This could make our commitIndex decrease (for
                           \* example if we process an old, duplicated request),
                           \* but that doesn't really affect anything.
-                       /\ commitIndex' = [commitIndex EXCEPT ![i] =
-                                              m.mcommitIndex]
+                       /\ commitIndex' = [commitIndex EXCEPT ![i] = 
+                                                            IF commitIndex[i] < m.mcommitIndex THEN 
+                                                                Min({m.mcommitIndex, Len(log[i])}) 
+                                                            ELSE 
+                                                                commitIndex[i]]
                        /\ Reply([mtype           |-> AppendEntriesResponse,
                                  mterm           |-> currentTerm[i],
                                  msuccess        |-> TRUE,
