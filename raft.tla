@@ -393,8 +393,8 @@ HandleAppendEntriesRequest(i, j, m) ==
 HandleAppendEntriesResponse(i, j, m) ==
     /\ m.mterm = currentTerm[i]
     /\ \/ /\ m.msuccess \* successful
-          /\ nextIndex'  = [nextIndex  EXCEPT ![i][j] = m.mmatchIndex + 1]
-          /\ matchIndex' = [matchIndex EXCEPT ![i][j] = m.mmatchIndex]
+          /\ matchIndex' = [matchIndex EXCEPT ![i][j] = IF matchIndex[i][j] > m.mmatchIndex THEN matchIndex[i][j] ELSE m.mmatchIndex]
+          /\ nextIndex'  = [nextIndex  EXCEPT ![i][j] = IF matchIndex[i][j] > m.mmatchIndex THEN matchIndex[i][j] + 1 ELSE m.mmatchIndex + 1]
        \/ /\ \lnot m.msuccess \* not successful
           /\ nextIndex' = [nextIndex EXCEPT ![i][j] =
                                Max({nextIndex[i][j] - 1, 1})]
